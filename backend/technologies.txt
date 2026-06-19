@@ -1,0 +1,126 @@
+LRMIS Backend — Technologies Used
+===================================
+
+Below is every technology used in the backend, whether it matches the
+professor's suggestion, and the reason for each choice.
+
+
+1. FastAPI
+----------
+Suggested by prof: YES
+Used: YES
+
+FastAPI is the main web framework. It handles all HTTP routing, request
+parsing, response serialization, and automatic OpenAPI/Swagger documentation.
+It is built on top of Starlette (ASGI) and Pydantic, which makes it
+natively async and ideal for a high-throughput REST API like LRMIS.
+
+
+2. Pydantic
+-----------
+Suggested by prof: YES
+Used: YES
+
+Pydantic is used for data validation. Every request body the API receives
+(e.g. ApplicationCreate, TransitionRequest, ParcelCreate) is a Pydantic
+model. Pydantic automatically validates field types, required fields, and
+enum values before the route handler runs, and returns a clear 422 error
+if the input is invalid. FastAPI is built around Pydantic, so this is the
+standard approach.
+
+
+3. Uvicorn
+----------
+Suggested by prof: YES
+Used: YES
+
+Uvicorn is the ASGI server that runs the FastAPI application. It is the
+standard development and production server for FastAPI. We install it with
+the [standard] extras to include the watchfiles reloader used by --reload
+during development.
+
+
+4. Python-dotenv
+----------------
+Suggested by prof: YES
+Used: YES
+
+Python-dotenv loads environment variables from the .env file into the
+Python process. This keeps sensitive configuration (MongoDB URL, database
+name) out of the source code and makes it easy to switch between local and
+production environments without changing any code.
+
+
+5. Motor  (instead of PyMongo)
+-------------------------------
+Suggested by prof: PyMongo
+Used: Motor (motor.motor_asyncio.AsyncIOMotorClient)
+
+WHY NOT PyMongo DIRECTLY:
+PyMongo is a synchronous driver. Every database call blocks the running
+thread until MongoDB responds. FastAPI is an asynchronous framework — when
+one request is waiting for the database, the server should be free to handle
+other requests at the same time. If we use a synchronous PyMongo call inside
+an async route, it blocks the entire event loop and makes the server behave
+as if it were single-threaded.
+
+WHY MOTOR:
+Motor is the official async MongoDB driver maintained by the same MongoDB
+team that maintains PyMongo. Internally, Motor is built on top of PyMongo —
+it wraps every PyMongo operation and runs it with async/await so the event
+loop is never blocked. The query syntax is identical to PyMongo, just with
+await added. Motor is the standard and recommended driver for any async
+Python framework (FastAPI, Starlette, aiohttp). Using Motor satisfies the
+spirit of the professor's requirement while being architecturally correct
+for an async application.
+
+PyMongo is still installed because Motor depends on it internally.
+
+
+6. PyMongo  (indirect dependency)
+-----------------------------------
+Suggested by prof: YES
+Used: YES (indirectly)
+
+PyMongo is listed in requirements.txt and is installed. Motor uses PyMongo
+under the hood for the BSON encoding, connection pooling, and MongoDB Wire
+Protocol implementation. We also use the bson package (which ships with
+PyMongo) directly for ObjectId validation and conversion in the routers.
+
+
+7. python-multipart
+--------------------
+Suggested by prof: NO
+Used: YES
+
+python-multipart is required by FastAPI to support multipart/form-data
+requests, which are used when uploading files (document attachments, survey
+reports). Without it, FastAPI cannot parse file upload requests. It is a
+standard companion package for FastAPI and has no alternative.
+
+
+8. Authentication
+-----------------
+Suggested by prof: Passlib or simple token-based authentication
+Used: NOT YET IMPLEMENTED
+
+Authentication has not been added yet. The plan is to implement simple
+token-based authentication (API key or JWT) as the professor suggested.
+Passlib will be used for password hashing if a login system is added.
+This will be implemented before the final submission.
+
+
+Summary Table
+=============
+
+Technology          | Prof Suggested | Used   | Note
+--------------------|----------------|--------|------------------------------
+FastAPI             | YES            | YES    | Main framework
+Pydantic            | YES            | YES    | Validation
+Uvicorn             | YES            | YES    | ASGI server
+Python-dotenv       | YES            | YES    | Environment variables
+PyMongo             | YES            | YES    | Indirect (Motor depends on it)
+Motor               | NO             | YES    | Async PyMongo — required for
+                    |                |        | FastAPI's async architecture
+python-multipart    | NO             | YES    | Required for file uploads
+Passlib / Auth      | YES            | PENDING| To be added before submission

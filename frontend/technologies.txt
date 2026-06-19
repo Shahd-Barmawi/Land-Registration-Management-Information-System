@@ -1,0 +1,103 @@
+LRMIS Frontend — Technologies Used
+====================================
+
+Below is every technology used in the frontend, whether it matches the
+professor's suggestion, and the reason for each choice.
+
+
+1. Next.js 16  (App Router)
+----------------------------
+Suggested by prof: React (general)
+Used: YES — Next.js 16 with App Router
+
+Next.js is a React framework that adds file-based routing, server-side
+rendering, and static generation on top of React. We use the App Router
+(introduced in Next.js 13) which organises pages under src/app/ using
+folder-based routes. Each folder can have its own layout.js so the three
+portals (applicant, staff, surveyor) each have an independent navigation
+bar and colour scheme without any shared global nav.
+
+Next.js also handles dynamic routes (e.g. /applicant/application/[id])
+and provides the redirect() helper used by the legacy route stubs.
+
+
+2. React 19
+------------
+Suggested by prof: YES
+Used: YES (bundled with Next.js 16)
+
+React is the UI library. All pages and components are React function
+components using hooks (useState, useEffect, useCallback, useParams, etc.).
+No class components are used. React 19 includes the new compiler and
+improved hydration, both of which are handled transparently by Next.js.
+
+
+3. Tailwind CSS v4
+-------------------
+Suggested by prof: NO (no specific CSS framework mentioned)
+Used: YES
+
+Tailwind CSS is a utility-first CSS framework. Instead of writing separate
+CSS files, styles are applied directly as class names in JSX. This makes it
+fast to build and iterate on UI without context-switching between files.
+
+We use Tailwind v4 which introduces a CSS-first configuration: the design
+tokens (colours, spacing) are defined inside globals.css using @theme instead
+of a tailwind.config.js file. The earthy colour palette (forest greens and
+earth browns) is declared there and used consistently across all portals.
+
+
+4. Leaflet + React-Leaflet
+---------------------------
+Suggested by prof: YES (Leaflet mentioned)
+Used: YES
+
+Leaflet is an open-source JavaScript mapping library. React-Leaflet provides
+React component wrappers (MapContainer, TileLayer, Marker, Polygon, etc.)
+so Leaflet maps can be used declaratively inside React components.
+
+Used in three places:
+  - MapPicker (submit form): lets the applicant click a point on the map to
+    mark parcel location; generates a GeoJSON Polygon approximation.
+  - MapView (shared component): renders a parcel polygon from stored GeoJSON;
+    used on the surveyor task detail page and applicant application detail.
+  - Live Map page (/surveyor/map): stub ready to receive GeoJSON feed from
+    the analytics module.
+
+Leaflet is loaded client-side only (dynamic import with ssr: false) because
+it depends on the browser's window object.
+
+
+5. OpenStreetMap  (tile provider)
+-----------------------------------
+Suggested by prof: YES
+Used: YES
+
+OpenStreetMap provides the background map tiles rendered inside every Leaflet
+map. The tile URL is https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png.
+It is free, open-source, and requires no API key.
+
+
+6. next/dynamic  (lazy loading)
+---------------------------------
+Suggested by prof: NO
+Used: YES
+
+next/dynamic is Next.js's code-splitting utility. It is required for Leaflet
+components because Leaflet accesses browser-only APIs (window, document) that
+do not exist during server-side rendering. Wrapping map components with
+dynamic(..., { ssr: false }) ensures they are only loaded in the browser.
+
+
+Summary Table
+=============
+
+Technology          | Prof Suggested | Used   | Note
+--------------------|----------------|--------|--------------------------------
+React               | YES            | YES    | UI library (via Next.js 16)
+Next.js 16          | Implied        | YES    | Framework, routing, SSR
+Tailwind CSS v4     | NO             | YES    | Utility-first styling
+Leaflet             | YES            | YES    | Interactive maps
+React-Leaflet       | NO             | YES    | React wrapper for Leaflet
+OpenStreetMap       | YES            | YES    | Free map tile provider
+next/dynamic        | NO             | YES    | SSR-safe lazy loading for maps

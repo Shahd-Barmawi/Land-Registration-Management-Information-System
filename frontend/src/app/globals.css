@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/* ── Earthy colour palette ───────────────────────────────────────── */
+@theme {
+  /* Forest greens */
+  --color-forest-50:  #f0f7f2;
+  --color-forest-100: #d9eddf;
+  --color-forest-200: #b3dbbf;
+  --color-forest-300: #8dc99f;
+  --color-forest-400: #67b77f;
+  --color-forest-500: #4a7c59;
+  --color-forest-600: #3a6347;
+  --color-forest-700: #2d5038;
+  --color-forest-800: #1f3827;
+  --color-forest-900: #102015;
+
+  /* Earth browns */
+  --color-earth-50:  #fdf8f0;
+  --color-earth-100: #f5e8d0;
+  --color-earth-200: #e9cfa0;
+  --color-earth-300: #ddb670;
+  --color-earth-400: #c9963a;
+  --color-earth-500: #8b6914;
+  --color-earth-600: #7a5c11;
+  --color-earth-700: #634a0d;
+  --color-earth-800: #4c380a;
+  --color-earth-900: #352606;
+
+  /* Neutrals */
+  --color-cream:     #faf8f3;
+  --color-parchment: #f5f0e8;
+}
+
+body {
+  background-color: #faf8f3;
+  color: #1a1a0e;
+}
+
+/* ── Leaflet fix (must be global) ────────────────────────────────── */
+.leaflet-container {
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}

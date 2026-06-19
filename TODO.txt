@@ -1,0 +1,142 @@
+LRMIS — Project TODO List
+==========================
+Due: 23-06-2026
+
+
+BACKEND
+-------
+
+[DONE] Project structure (backend/ and frontend/ directories)
+[DONE] requirements.txt and .env
+[DONE] MongoDB connection (Motor async client)
+[DONE] All required MongoDB indexes (13 indexes across 5 collections)
+[DONE] Pydantic models (application, parcel, certificate, applicant stub, staff stub, survey stub)
+[DONE] Workflow state machine (services/workflow.py)
+[DONE] Audit logger → performance_logs (services/audit.py)
+[DONE] main.py (lifespan, CORS, routers mounted, Swagger)
+
+[DONE] Module 1 — Land Application Management (Student 1)
+      [DONE] POST   /applications/                          (with idempotency key)
+      [DONE] GET    /applications/                          (filters, pagination, sorting)
+      [DONE] GET    /applications/{id}
+      [DONE] PATCH  /applications/{id}/transition
+      [DONE] POST   /applications/{id}/hold
+      [DONE] POST   /applications/{id}/reject
+      [DONE] POST   /applications/{id}/certificate          (creates cert + advances status)
+      [DONE] POST   /applications/{id}/notes                (internal staff notes)
+      [DONE] PATCH  /applications/{id}/documents/{type}/status  (verify / reject / missing)
+      [DONE] POST   /applications/{id}/documents/upload     (GridFS file upload — bonus)
+      [DONE] GET    /applications/{id}/documents/{file_id}  (GridFS file download — bonus)
+      [DONE] POST   /parcels/
+      [DONE] GET    /parcels/{id}                           (by ObjectId or parcel_code)
+      [DONE] PATCH  /parcels/{id}
+      [DONE] GET    /parcels/                               (filter by zone, status, dispute)
+
+[ ] Module 2 — Applicant Portal and Profiles (Student 2)
+      [ ] POST   /applicants/
+      [ ] GET    /applicants/{id}
+      [ ] GET    /applicants/{id}/applications
+      [ ] POST   /applications/{id}/documents              (metadata-only add)
+      [ ] POST   /applications/{id}/comments
+      [ ] POST   /applications/{id}/objections
+      [ ] GET    /applications/{id}/timeline
+
+[ ] Module 3 — Surveyors, Registrar, and Assignment (Student 3)
+      [ ] POST   /staff/
+      [ ] GET    /staff/{id}
+      [ ] POST   /applications/{id}/auto-assign-surveyor
+      [ ] PATCH  /applications/{id}/survey-milestone
+      [ ] POST   /applications/{id}/survey-report
+      [ ] PATCH  /applications/{id}/registrar-review
+
+[ ] Module 4 — Data Analysis, Map, and Visualization (Group)
+      [ ] GET    /analytics/kpis
+      [ ] GET    /analytics/applications-by-status
+      [ ] GET    /analytics/applications-by-zone
+      [ ] GET    /analytics/processing-time
+      [ ] GET    /analytics/surveyors
+      [ ] GET    /analytics/registrars
+      [ ] GET    /analytics/geofeeds/parcels
+      [ ] GET    /analytics/geofeeds/pending-heatmap
+
+[ ] Authentication and Access Control (JWT)
+      [ ] Install dependencies: python-jose, passlib[bcrypt]
+      [ ] Create user model (username, hashed_password, role)
+            roles: applicant | staff | surveyor | registrar | admin
+      [ ] POST /auth/register   — create user account
+      [ ] POST /auth/login      — return JWT access token
+      [ ] JWT utility (create token, decode token, get current user)
+      [ ] Dependency: get_current_user (reads Authorization: Bearer <token>)
+      [ ] Dependency: require_role("staff") for staff-only endpoints
+      [ ] Protect Module 3 endpoints (staff/registrar only)
+      [ ] Protect POST /applications/{id}/certificate (registrar only)
+      [ ] Protect PATCH /applications/{id}/transition (staff only)
+      [ ] Protect GET /staff/{id} (staff only)
+
+[ ] Seed script (insert sample data matching spec schemas)
+[ ] README.md (setup, env vars, indexes, sample users, run instructions)
+[ ] Postman collection (example request for every endpoint)
+
+
+FRONTEND
+--------
+
+[DONE] Framework: Next.js 16 App Router with Tailwind CSS v4
+[DONE] 3-portal architecture: /applicant/, /staff/, /surveyor/ with own layouts
+[DONE] Landing page (role-based portal selection, hero, footer)
+[DONE] Shared components: StatusBadge, ApplicationTimeline, MapView, MapPicker, StepIndicator
+
+[DONE] Student 1 UI — Applicant Portal
+      [DONE] Submit land application form (5-step wizard)
+                  Step 1: Application type + priority
+                  Step 2: Applicant info (ID, type, representative flag)
+                  Step 3: Parcel details + map location picker (Leaflet)
+                  Step 4: Document upload (GridFS)
+                  Step 5: Review and submit
+      [DONE] Application confirmation (redirect to detail page after submit)
+      [DONE] Track application page (filter by status/priority/sort, search by ID)
+      [DONE] Application detail page (status, timeline, documents, objection form)
+      [DONE] Upload additional documents (dropdown of remaining types)
+      [DONE] Submit objection form
+      [DONE] Parcel always creates a record in /parcels/ on submit (with or without map)
+
+[DONE] Student 2 UI — Registrar and Staff Console
+      [DONE] Staff dashboard (live counts per status, links to filtered lists)
+      [DONE] Application management table (filter by status, priority, sort)
+      [DONE] Application detail page (applicant + parcel info, timestamps)
+      [DONE] Registrar review screen:
+                  - Per-document Verify / Reject Doc / Mark Missing buttons
+                  - Workflow transition buttons (one per allowed_next state, confirm step)
+                  - Place on Hold (with reason, expandable)
+                  - Reject application (with reason, expandable)
+                  - Internal notes (add + scrollable history)
+      [DONE] Certificate issuance screen (/staff/certificates):
+                  - Lists approved applications with inline issue form
+                  - Lists already-issued applications
+
+[~] Student 3 UI — Surveyor, Map, and Analytics
+      [DONE] Surveyor portal layout and dashboard
+      [DONE] Surveyor task list (via /applicant applications filtered by survey states)
+      [DONE] Survey task detail page (parcel info + MapView)
+      [DONE] Live parcel map page (Leaflet stub — ready for GeoJSON feed from Module 4)
+      [DONE] Analytics dashboard (connected to /analytics/summary, graceful fallback)
+      [ ]   Survey task execution (milestone buttons — needs Module 3 backend)
+      [ ]   Real map data feed (needs GET /analytics/geofeeds/parcels from Module 4)
+
+
+DELIVERABLES CHECKLIST
+-----------------------
+
+[ ] GitHub repository (clean commits, good README)
+[ ] README.md with setup instructions
+[ ] OpenAPI / Postman documentation
+[ ] Example API requests
+[ ] Seed data
+[ ] All 4 modules working end-to-end
+[ ] Final presentation slides
+      [ ] System demo
+      [ ] Code walkthrough
+      [ ] Database design
+      [ ] Workflow explanation
+      [ ] Design decisions
+      [ ] Challenges and solutions
