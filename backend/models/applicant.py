@@ -26,3 +26,19 @@ class ApplicantCreate(BaseModel):
     city: Optional[str] = None
     zone_id: Optional[str] = None
     preferred_language: str = "en"
+
+    verification_state: str = "unverified"
+    notify_status_change: bool = True
+    notify_missing_documents: bool = True
+    notify_certificate_ready: bool = True
+
+    privacy_settings: dict = {}
+
+class ApplicantComment(BaseModel):
+    comment: str
+    actor_id: str
+
+
+class ObjectionCreate(BaseModel):
+    reason: str
+    actor_id: str
