@@ -1,9 +1,10 @@
 'use client'
-import { useState, useId } from 'react'
+import { useState, useId, useEffect } from 'react'
 import dynamic from 'next/dynamic'
 import { useRouter } from 'next/navigation'
 import StepIndicator from '@/components/StepIndicator'
 import { createApplication, createParcel, getParcel, uploadDocument } from '@/lib/api'
+import { getUser, isLoggedIn } from '@/lib/auth'
 
 const MapPicker = dynamic(() => import('@/components/MapPicker'), { ssr: false })
 
@@ -67,6 +68,20 @@ export default function SubmitPage() {
   const [loading, setLoading] = useState(false)
   const [status,  setStatus]  = useState('')
   const [error,   setError]   = useState(null)
+  const [authUser, setAuthUser] = useState(null)
+
+  useEffect(() => {
+    if (!isLoggedIn()) {
+      router.replace('/applicant/login')
+      return
+    }
+    const u = getUser()
+    setAuthUser(u)
+    // Pre-fill applicant_id from session
+    if (u?.applicant_id) {
+      setForm(f => ({ ...f, applicant_id: u.applicant_id }))
+    }
+  }, [router])
 
   const set = (field, val) => setForm((f) => ({ ...f, [field]: val }))
 
@@ -89,7 +104,7 @@ export default function SubmitPage() {
 
   const canNext = () => {
     if (step === 1) return !!form.application_type
-    if (step === 2) return !!form.applicant_id && !!form.applicant_type
+    if (step === 2) return !!(form.applicant_id && form.applicant_type)
     if (step === 3) return !!(form.parcel_number && form.block_number && form.basin_number && form.zone_id)
     return true
   }
@@ -223,12 +238,29 @@ export default function SubmitPage() {
         {step === 2 && (
           <div className="space-y-5">
             <h2 className="text-lg font-bold text-forest-800">Applicant Information</h2>
-            <Field label="Applicant ID / National ID" required>
-              <input className={inputCls} placeholder="e.g. 400000000" value={form.applicant_id} onChange={(e) => set('applicant_id', e.target.value)} />
-            </Field>
-            <Field label="Applicant Type" required>
+
+            {/* Signed-in user — read-only */}
+            <div className="bg-forest-50 border border-forest-200 rounded-xl p-5 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-forest-700 text-white flex items-center justify-center font-bold text-sm shrink-0">
+                  {authUser?.full_name?.[0] ?? '?'}
+                </div>
+                <div>
+                  <p className="font-semibold text-forest-900">{authUser?.full_name}</p>
+                  <p className="text-xs text-forest-500">{authUser?.email}</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 text-sm pt-1">
+                <div>
+                  <p className="text-forest-400 text-xs">Applicant ID</p>
+                  <p className="font-mono font-medium text-forest-800 truncate">{authUser?.applicant_id}</p>
+                </div>
+              </div>
+            </div>
+
+            <Field label="Applicant Type">
               <select className={selectCls} value={form.applicant_type} onChange={(e) => set('applicant_type', e.target.value)}>
-                {['citizen','lawyer','company','surveyor','authorized_representative'].map((t) => (
+                {['citizen','lawyer','company','authorized_representative'].map((t) => (
                   <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>
                 ))}
               </select>

@@ -12,6 +12,10 @@ from models.application import (
     HoldRequest, RejectRequest, CertificateRequest,
     NoteRequest, DocumentStatusUpdate,
 )
+from models.survey import (
+    SurveyMilestoneUpdate, SurveyReportCreate, RegistrarReviewRequest,
+    VALID_MILESTONES, MILESTONE_ORDER,
+)
 from services.workflow import (
     can_transition, get_allowed_next, validate_transition_guards,
     TIMESTAMP_FIELDS, CERTIFICATE_TYPE_MAP, TERMINAL_STATES,
@@ -118,6 +122,7 @@ async def list_applications(
     application_type: Optional[str] = None,
     zone_id: Optional[str] = None,
     priority: Optional[str] = None,
+    assigned_surveyor_id: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
     page: int = Query(default=1, ge=1),
@@ -137,6 +142,8 @@ async def list_applications(
         query["parcel_ref.zone_id"] = zone_id
     if priority:
         query["priority"] = priority
+    if assigned_surveyor_id:
+        query["assignment.assigned_surveyor_id"] = assigned_surveyor_id
     if date_from or date_to:
         date_filter: dict = {}
         if date_from:
@@ -560,6 +567,311 @@ async def update_document_status(
         actor_type="staff",
         actor_id=body.actor_id,
         meta={"document_type": document_type, "new_status": body.status},
+    )
+
+    updated = await db.land_applications.find_one({"application_id": application_id})
+    return serialize_doc(updated)
+
+
+# ── GET /applications/{application_id}/survey-task ───────────────────────────
+
+@router.get("/{application_id}/survey-task")
+async def get_survey_task(application_id: str, db=Depends(get_db)):
+    task = await db.survey_tasks.find_one({"application_id": application_id})
+    if not task:
+        raise HTTPException(404, f"No survey task found for application '{application_id}'")
+    return serialize_doc(task)
+
+
+# ── POST /applications/{application_id}/auto-assign-surveyor ──────────────────
+
+@router.post("/{application_id}/auto-assign-surveyor", status_code=200)
+async def auto_assign_surveyor(application_id: str, db=Depends(get_db)):
+    app = await db.land_applications.find_one({"application_id": application_id})
+    if not app:
+        raise HTTPException(404, f"Application '{application_id}' not found")
+
+    zone_id = app.get("parcel_ref", {}).get("zone_id")
+    if not zone_id:
+        raise HTTPException(400, "Application has no zone_id — cannot assign surveyor")
+
+    # Zone match + active + not overloaded, sorted by fewest active tasks
+    pipeline = [
+        {"$match": {"role": "surveyor", "active": True, "coverage.zone_ids": zone_id}},
+        {"$addFields": {"capacity": {"$subtract": ["$workload.max_tasks", "$workload.active_tasks"]}}},
+        {"$match": {"capacity": {"$gt": 0}}},
+        {"$sort": {"workload.active_tasks": 1}},
+        {"$limit": 10},
+    ]
+    candidates = await db.staff_members.aggregate(pipeline).to_list(10)
+
+    if not candidates:
+        # Fallback: any active surveyor with capacity
+        fallback = [
+            {"$match": {"role": "surveyor", "active": True}},
+            {"$addFields": {"capacity": {"$subtract": ["$workload.max_tasks", "$workload.active_tasks"]}}},
+            {"$match": {"capacity": {"$gt": 0}}},
+            {"$sort": {"workload.active_tasks": 1}},
+            {"$limit": 1},
+        ]
+        candidates = await db.staff_members.aggregate(fallback).to_list(1)
+        if not candidates:
+            raise HTTPException(400, "No available surveyor found (all at capacity or none registered)")
+
+    surveyor = candidates[0]
+    surveyor_id = str(surveyor["_id"])
+
+    seq = await _next_seq(db, "survey_seq")
+    task_id = f"SURV-{datetime.utcnow().year}-{str(seq).zfill(4)}"
+
+    now = datetime.utcnow()
+    task_doc = {
+        "task_id": task_id,
+        "application_id": application_id,
+        "parcel_id": app.get("parcel_ref", {}).get("parcel_id"),
+        "assigned_surveyor_id": surveyor_id,
+        "status": "assigned",
+        "milestones": [{
+            "type": "assigned",
+            "at": now,
+            "by": "system",
+            "meta": {"reason": "zone and workload match", "zone_id": zone_id, "surveyor_code": surveyor["staff_code"]},
+        }],
+        "field_notes": [],
+        "report_uploaded": False,
+        "created_at": now,
+    }
+    await db.survey_tasks.insert_one(task_doc)
+
+    await db.land_applications.update_one(
+        {"application_id": application_id},
+        {"$set": {
+            "assignment.assigned_surveyor_id": surveyor_id,
+            "assignment.assigned_surveyor_code": surveyor["staff_code"],
+            "timestamps.updated_at": now,
+        }},
+    )
+
+    await db.staff_members.update_one(
+        {"_id": surveyor["_id"]},
+        {"$inc": {"workload.active_tasks": 1}},
+    )
+
+    await log_event(
+        db, application_id,
+        event_type="survey_assigned",
+        actor_type="system",
+        actor_id="assignment_engine",
+        meta={"assigned_surveyor": surveyor["staff_code"], "task_id": task_id, "zone_id": zone_id},
+    )
+
+    task_doc.pop("_id", None)
+    return {"task_id": task_id, "assigned_surveyor": serialize_doc(surveyor), "task": task_doc}
+
+
+# ── PATCH /applications/{application_id}/survey-milestone ─────────────────────
+
+@router.patch("/{application_id}/survey-milestone")
+async def update_survey_milestone(
+    application_id: str,
+    body: SurveyMilestoneUpdate,
+    db=Depends(get_db),
+):
+    if body.milestone not in VALID_MILESTONES:
+        raise HTTPException(400, f"Invalid milestone. Must be one of: {VALID_MILESTONES}")
+
+    task = await db.survey_tasks.find_one({"application_id": application_id})
+    if not task:
+        raise HTTPException(404, f"No survey task found for application '{application_id}'")
+
+    current_status = task.get("status", "assigned")
+    current_order = MILESTONE_ORDER.get(current_status, 0)
+    new_order = MILESTONE_ORDER[body.milestone]
+
+    if new_order <= current_order:
+        raise HTTPException(
+            400,
+            f"Cannot go from milestone '{current_status}' → '{body.milestone}'. Must advance forward.",
+        )
+
+    now = datetime.utcnow()
+    milestone_entry: dict = {
+        "type": body.milestone,
+        "at": now,
+        "by": body.actor_id,
+        "meta": dict(body.meta or {}),
+    }
+    if body.notes:
+        milestone_entry["meta"]["notes"] = body.notes
+
+    set_fields: dict = {"status": body.milestone}
+    if body.milestone == "report_uploaded":
+        set_fields["report_uploaded"] = True
+
+    await db.survey_tasks.update_one(
+        {"application_id": application_id},
+        {"$set": set_fields, "$push": {"milestones": milestone_entry}},
+    )
+
+    # Auto-advance application to 'surveyed' when survey completes
+    if body.milestone == "survey_completed":
+        app_doc = await db.land_applications.find_one({"application_id": application_id})
+        if app_doc and app_doc.get("status") == "survey_required":
+            await db.land_applications.update_one(
+                {"application_id": application_id},
+                {"$set": {
+                    "status": "surveyed",
+                    "workflow.current_state": "surveyed",
+                    "workflow.allowed_next": get_allowed_next("surveyed"),
+                    "timestamps.surveyed_at": now,
+                    "timestamps.updated_at": now,
+                }},
+            )
+
+    await log_event(
+        db, application_id,
+        event_type=f"survey_milestone_{body.milestone}",
+        actor_type="surveyor",
+        actor_id=body.actor_id,
+        meta={"milestone": body.milestone, "notes": body.notes},
+    )
+
+    updated_task = await db.survey_tasks.find_one({"application_id": application_id})
+    return serialize_doc(updated_task)
+
+
+# ── POST /applications/{application_id}/survey-report ─────────────────────────
+
+@router.post("/{application_id}/survey-report", status_code=201)
+async def submit_survey_report(
+    application_id: str,
+    body: SurveyReportCreate,
+    db=Depends(get_db),
+):
+    app = await db.land_applications.find_one({"application_id": application_id})
+    if not app:
+        raise HTTPException(404, f"Application '{application_id}' not found")
+
+    now = datetime.utcnow()
+    report_doc = {
+        "application_id": application_id,
+        "surveyor_id": body.surveyor_id,
+        "report_summary": body.report_summary,
+        "findings": body.findings,
+        "field_notes": body.field_notes,
+        "submitted_at": now,
+    }
+    result = await db.survey_reports.insert_one(report_doc)
+    report_doc["_id"] = result.inserted_id
+
+    # Mark survey task report_uploaded
+    await db.survey_tasks.update_one(
+        {"application_id": application_id},
+        {
+            "$set": {"report_uploaded": True, "status": "report_uploaded"},
+            "$push": {"milestones": {
+                "type": "report_uploaded",
+                "at": now,
+                "by": body.surveyor_id,
+                "meta": {"report_summary": body.report_summary},
+            }},
+        },
+    )
+
+    # Advance application to 'surveyed' if still at survey_required
+    if app.get("status") == "survey_required":
+        await db.land_applications.update_one(
+            {"application_id": application_id},
+            {"$set": {
+                "status": "surveyed",
+                "workflow.current_state": "surveyed",
+                "workflow.allowed_next": get_allowed_next("surveyed"),
+                "timestamps.surveyed_at": now,
+                "timestamps.updated_at": now,
+            }},
+        )
+
+    await log_event(
+        db, application_id,
+        event_type="survey_report_submitted",
+        actor_type="surveyor",
+        actor_id=body.surveyor_id,
+        meta={"report_summary": body.report_summary},
+    )
+
+    return serialize_doc(report_doc)
+
+
+# ── PATCH /applications/{application_id}/registrar-review ─────────────────────
+
+@router.patch("/{application_id}/registrar-review")
+async def registrar_review(
+    application_id: str,
+    body: RegistrarReviewRequest,
+    db=Depends(get_db),
+):
+    app = await db.land_applications.find_one({"application_id": application_id})
+    if not app:
+        raise HTTPException(404, f"Application '{application_id}' not found")
+
+    current = app["status"]
+    now = datetime.utcnow()
+
+    note_entry = (
+        f"[{now.isoformat()}] [{body.actor_id}] [REGISTRAR REVIEW] Decision: {body.decision}"
+        + (f" — {body.notes}" if body.notes else "")
+    )
+
+    set_fields: dict = {"timestamps.updated_at": now}
+
+    if body.decision == "approve" and current in ("legal_review", "surveyed", "pre_checked"):
+        set_fields.update({
+            "status": "approved",
+            "workflow.current_state": "approved",
+            "workflow.allowed_next": get_allowed_next("approved"),
+            "timestamps.approved_at": now,
+        })
+    elif body.decision == "reject" and current in REJECTABLE_STATES:
+        set_fields.update({
+            "status": "rejected",
+            "rejection_reason": body.notes or "Rejected during registrar review",
+            "workflow.current_state": "rejected",
+            "workflow.allowed_next": [],
+        })
+    elif body.decision == "hold" and current in HOLDABLE_STATES:
+        set_fields.update({
+            "status": "on_hold",
+            "hold_reason": body.notes or "Placed on hold during registrar review",
+            "workflow.current_state": "on_hold",
+            "workflow.allowed_next": get_allowed_next("on_hold"),
+        })
+    # decision == "note" → only appends the note, no state change
+
+    # Mark survey task registrar_reviewed if one exists
+    await db.survey_tasks.update_one(
+        {"application_id": application_id},
+        {
+            "$set": {"status": "registrar_reviewed"},
+            "$push": {"milestones": {
+                "type": "registrar_reviewed",
+                "at": now,
+                "by": body.actor_id,
+                "meta": {"decision": body.decision, "notes": body.notes},
+            }},
+        },
+    )
+
+    await db.land_applications.update_one(
+        {"application_id": application_id},
+        {"$set": set_fields, "$push": {"internal.notes": note_entry}},
+    )
+
+    await log_event(
+        db, application_id,
+        event_type="registrar_review",
+        actor_type="registrar",
+        actor_id=body.actor_id,
+        meta={"decision": body.decision, "notes": body.notes, "from_state": current},
     )
 
     updated = await db.land_applications.find_one({"application_id": application_id})

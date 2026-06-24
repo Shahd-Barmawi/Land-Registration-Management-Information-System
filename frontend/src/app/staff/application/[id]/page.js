@@ -6,6 +6,7 @@ import {
   getApplication, documentUrl,
   transitionApplication, holdApplication, rejectApplication, issueCertificate,
   addNote, updateDocumentStatus,
+  autoAssignSurveyor, registrarReview,
 } from '@/lib/api'
 import StatusBadge from '@/components/StatusBadge'
 import ApplicationTimeline from '@/components/ApplicationTimeline'
@@ -193,6 +194,44 @@ export default function StaffApplicationDetail() {
       alert(e?.detail ?? 'Failed to update document status.')
     } finally {
       setDocLoading((p) => ({ ...p, [documentType]: false }))
+    }
+  }
+
+  // Auto-assign surveyor
+  const [assignLoading, setAssignLoading] = useState(false)
+  async function doAutoAssign() {
+    setAssignLoading(true); setActionError(null)
+    try {
+      const result = await autoAssignSurveyor(id)
+      await reload()
+      flashSuccess(`Surveyor ${result.assigned_surveyor?.staff_code ?? ''} assigned — task ${result.task_id} created.`)
+    } catch (e) {
+      setActionError(e?.detail ?? 'Auto-assign failed.')
+    } finally {
+      setAssignLoading(false)
+    }
+  }
+
+  // Registrar review
+  const [showReview,    setShowReview]    = useState(false)
+  const [reviewDecision, setReviewDecision] = useState('approve')
+  const [reviewNotes,   setReviewNotes]   = useState('')
+  const [reviewActorId, setReviewActorId] = useState('registrar')
+  async function doRegistrarReview() {
+    setActionLoading(true); setActionError(null)
+    try {
+      const updated = await registrarReview(id, {
+        decision: reviewDecision,
+        notes: reviewNotes || undefined,
+        actor_id: reviewActorId || 'registrar',
+      })
+      setApp(updated)
+      setShowReview(false); setReviewNotes('')
+      flashSuccess(`Registrar review recorded: ${reviewDecision}.`)
+    } catch (e) {
+      setActionError(e?.detail ?? 'Review failed.')
+    } finally {
+      setActionLoading(false)
     }
   }
 
@@ -559,6 +598,92 @@ export default function StaffApplicationDetail() {
                   >
                     {actionLoading ? 'Processing…' : 'Confirm Reject'}
                   </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Auto-assign surveyor — shown when survey_required and not yet assigned */}
+          {app.status === 'survey_required' && !app.assignment?.assigned_surveyor_id && (
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4 shadow-sm">
+              <p className="text-sm font-semibold text-amber-800 mb-1">Assign Surveyor</p>
+              <p className="text-xs text-amber-700 mb-3">
+                Automatically select the best-matched surveyor by zone, skill, and workload.
+              </p>
+              <button
+                onClick={doAutoAssign}
+                disabled={assignLoading}
+                className="w-full bg-amber-500 hover:bg-amber-600 text-white text-sm py-2.5 rounded-xl font-medium disabled:opacity-50 transition-colors"
+              >
+                {assignLoading ? 'Assigning…' : 'Auto-Assign Surveyor'}
+              </button>
+            </div>
+          )}
+
+          {/* Show assigned surveyor */}
+          {app.assignment?.assigned_surveyor_code && (
+            <div className="bg-white border border-forest-100 rounded-2xl px-5 py-4 shadow-sm text-sm">
+              <p className="text-xs font-semibold text-forest-500 uppercase tracking-wide mb-2">Assigned Surveyor</p>
+              <p className="font-mono font-semibold text-forest-800">{app.assignment.assigned_surveyor_code}</p>
+            </div>
+          )}
+
+          {/* Registrar review — available when surveyed or in legal_review */}
+          {(app.status === 'surveyed' || app.status === 'legal_review' || app.status === 'pre_checked') && (
+            <div className="bg-white border border-purple-100 rounded-2xl px-5 py-4 shadow-sm">
+              <button
+                onClick={() => setShowReview(!showReview)}
+                className="w-full flex items-center justify-between text-sm font-semibold text-purple-700"
+              >
+                <span>Registrar Review</span>
+                <span className="text-xs">{showReview ? '▲' : '▼'}</span>
+              </button>
+              {showReview && (
+                <div className="mt-3 space-y-2">
+                  <div>
+                    <label className="block text-xs text-forest-500 mb-1">Decision</label>
+                    <select
+                      value={reviewDecision}
+                      onChange={e => setReviewDecision(e.target.value)}
+                      className={inputCls}
+                    >
+                      <option value="approve">Approve</option>
+                      <option value="reject">Reject</option>
+                      <option value="hold">Place on Hold</option>
+                      <option value="note">Add Note Only</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-forest-500 mb-1">Registrar ID</label>
+                    <input
+                      value={reviewActorId}
+                      onChange={e => setReviewActorId(e.target.value)}
+                      placeholder="e.g. REGI-RM-01"
+                      className={inputCls}
+                    />
+                  </div>
+                  <textarea
+                    value={reviewNotes}
+                    onChange={e => setReviewNotes(e.target.value)}
+                    rows={2}
+                    placeholder="Decision notes (required for reject/hold)…"
+                    className="w-full border border-purple-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-400 resize-none"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={doRegistrarReview}
+                      disabled={actionLoading}
+                      className="flex-1 bg-purple-600 hover:bg-purple-700 text-white text-sm py-2 rounded-lg font-medium disabled:opacity-50 transition-colors"
+                    >
+                      {actionLoading ? 'Processing…' : 'Submit Review'}
+                    </button>
+                    <button
+                      onClick={() => setShowReview(false)}
+                      className="text-sm px-3 py-2 border border-forest-200 rounded-lg text-forest-600 hover:bg-forest-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

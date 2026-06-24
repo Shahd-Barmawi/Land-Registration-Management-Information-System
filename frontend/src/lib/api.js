@@ -1,14 +1,29 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
+function authHeader() {
+  if (typeof window === 'undefined') return {}
+  const token = localStorage.getItem('lrmis_token')
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
 async function request(path, { headers: extraHeaders, ...rest } = {}) {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...extraHeaders },
+    headers: { 'Content-Type': 'application/json', ...authHeader(), ...extraHeaders },
     ...rest,
   })
   const data = await res.json()
   if (!res.ok) throw data
   return data
 }
+
+// Auth
+export const registerApplicant = (body) =>
+  request('/auth/register', { method: 'POST', body: JSON.stringify(body) })
+
+export const loginApplicant = (email, password) =>
+  request('/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) })
+
+export const getMe = () => request('/auth/me')
 
 // Applications
 export const createApplication = (body, idempotencyKey) =>
@@ -86,5 +101,49 @@ export const updateDocumentStatus = (id, documentType, body) =>
     body: JSON.stringify(body),
   })
 
-// Analytics (Module 4)
-export const getAnalyticsSummary = () => request('/analytics/summary')
+// Staff — Module 3
+export const createStaff = (body) =>
+  request('/staff/', { method: 'POST', body: JSON.stringify(body) })
+
+export const listStaff = (params = {}) => {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null))
+  ).toString()
+  return request(`/staff/?${qs}`)
+}
+
+export const getStaff = (staffId) => request(`/staff/${staffId}`)
+
+// Survey — Module 3
+export const autoAssignSurveyor = (appId) =>
+  request(`/applications/${appId}/auto-assign-surveyor`, { method: 'POST' })
+
+export const updateSurveyMilestone = (appId, body) =>
+  request(`/applications/${appId}/survey-milestone`, { method: 'PATCH', body: JSON.stringify(body) })
+
+export const submitSurveyReport = (appId, body) =>
+  request(`/applications/${appId}/survey-report`, { method: 'POST', body: JSON.stringify(body) })
+
+export const registrarReview = (appId, body) =>
+  request(`/applications/${appId}/registrar-review`, { method: 'PATCH', body: JSON.stringify(body) })
+
+export const getSurveyTask = (appId) =>
+  request(`/applications/${appId}/survey-task`)
+
+// Analytics — Module 4
+export const getAnalyticsKpis = () => request('/analytics/kpis')
+export const getApplicationsByStatus = () => request('/analytics/applications-by-status')
+export const getApplicationsByZone = () => request('/analytics/applications-by-zone')
+export const getProcessingTime = () => request('/analytics/processing-time')
+export const getSurveyorsAnalytics = () => request('/analytics/surveyors')
+export const getRegistrarsAnalytics = () => request('/analytics/registrars')
+export const getParcelGeofeed = (params = {}) => {
+  const qs = new URLSearchParams(
+    Object.fromEntries(Object.entries(params).filter(([, v]) => v != null))
+  ).toString()
+  return request(`/analytics/geofeeds/parcels?${qs}`)
+}
+export const getPendingHeatmap = () => request('/analytics/geofeeds/pending-heatmap')
+
+// Legacy alias kept for backward compat
+export const getAnalyticsSummary = () => request('/analytics/kpis')

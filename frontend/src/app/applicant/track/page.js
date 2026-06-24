@@ -1,7 +1,9 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { getApplication, listApplications } from '@/lib/api'
+import { getUser, isLoggedIn } from '@/lib/auth'
 import StatusBadge from '@/components/StatusBadge'
 import ApplicationTimeline from '@/components/ApplicationTimeline'
 
@@ -16,6 +18,10 @@ const STATUSES = [
   'legal_review', 'approved', 'certificate_issued', 'closed',
   'rejected', 'on_hold', 'missing_documents', 'under_objection',
 ]
+
+const selectCls = 'border border-forest-200 rounded-lg px-3 py-2 text-sm text-forest-800 bg-white focus:outline-none focus:ring-2 focus:ring-forest-400'
+
+// ── Track a single application by ID ─────────────────────────────────────────
 
 function TrackById() {
   const [query,   setQuery]   = useState('')
@@ -94,47 +100,25 @@ function TrackById() {
   )
 }
 
-function MyApplications() {
-  const [applicantId, setApplicantId] = useState('')
-  const [searched,    setSearched]    = useState(false)
-  const [results,     setResults]     = useState(null)
-  const [loading,     setLoading]     = useState(false)
-  const [error,       setError]       = useState(null)
+// ── My Applications (auto-loaded from session) ────────────────────────────────
 
+function MyApplications({ applicantId }) {
+  const [results,   setResults]   = useState(null)
+  const [loading,   setLoading]   = useState(true)
+  const [error,     setError]     = useState(null)
   const [priority,  setPriority]  = useState('')
   const [status,    setStatus]    = useState('')
   const [sortOrder, setSortOrder] = useState('-1')
 
-  async function search(e) {
-    e.preventDefault()
-    if (!applicantId.trim()) return
-    setLoading(true); setError(null)
-    try {
-      const data = await listApplications({
-        applicant_id: applicantId.trim(),
-        priority:     priority  || undefined,
-        status:       status    || undefined,
-        sort_order:   sortOrder,
-        limit: 50,
-      })
-      setResults(data)
-      setSearched(true)
-    } catch {
-      setError('Failed to load applications.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  async function applyFilters() {
-    if (!applicantId.trim()) return
+  async function load(params = {}) {
     setLoading(true)
+    setError(null)
     try {
       const data = await listApplications({
-        applicant_id: applicantId.trim(),
-        priority:     priority  || undefined,
-        status:       status    || undefined,
-        sort_order:   sortOrder,
+        applicant_id: applicantId,
+        priority:     params.priority  ?? priority  ?? undefined,
+        status:       params.status    ?? status    ?? undefined,
+        sort_order:   params.sortOrder ?? sortOrder,
         limit: 50,
       })
       setResults(data)
@@ -145,69 +129,62 @@ function MyApplications() {
     }
   }
 
-  const selectCls = 'border border-forest-200 rounded-lg px-3 py-2 text-sm text-forest-800 bg-white focus:outline-none focus:ring-2 focus:ring-forest-400'
+  // Auto-load on mount
+  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function applyFilters() { load({ priority, status, sortOrder }) }
 
   return (
     <div>
-      <form onSubmit={search} className="flex gap-3 mb-6">
-        <input
-          value={applicantId}
-          onChange={(e) => setApplicantId(e.target.value)}
-          placeholder="Enter your National ID / Applicant ID"
-          className="flex-1 border-2 border-forest-200 rounded-xl px-4 py-3 text-forest-900 bg-white focus:outline-none focus:border-forest-500 text-sm"
-        />
-        <button
-          type="submit"
-          disabled={loading}
-          className="bg-forest-700 hover:bg-forest-800 text-white px-6 py-3 rounded-xl font-semibold text-sm disabled:opacity-50 transition-colors"
-        >
-          {loading ? '…' : 'Load'}
-        </button>
-      </form>
-
-      {searched && (
-        <div className="flex flex-wrap gap-3 mb-6 p-4 bg-parchment border border-earth-200 rounded-xl">
-          <div>
-            <label className="block text-xs text-forest-500 mb-1">Priority</label>
-            <select className={selectCls} value={priority} onChange={(e) => { setPriority(e.target.value) }}>
-              <option value="">All priorities</option>
-              {PRIORITIES.map((p) => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-forest-500 mb-1">Status</label>
-            <select className={selectCls} value={status} onChange={(e) => { setStatus(e.target.value) }}>
-              <option value="">All statuses</option>
-              {STATUSES.map((s) => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-forest-500 mb-1">Sort</label>
-            <select className={selectCls} value={sortOrder} onChange={(e) => { setSortOrder(e.target.value) }}>
-              <option value="-1">Newest first</option>
-              <option value="1">Oldest first</option>
-            </select>
-          </div>
-          <div className="flex items-end">
-            <button
-              onClick={applyFilters}
-              disabled={loading}
-              className="bg-forest-600 hover:bg-forest-700 text-white text-sm px-4 py-2 rounded-lg font-medium disabled:opacity-50 transition-colors"
-            >
-              Apply
-            </button>
-          </div>
+      {/* Filter bar */}
+      <div className="flex flex-wrap gap-3 mb-6 p-4 bg-parchment border border-earth-200 rounded-xl">
+        <div>
+          <label className="block text-xs text-forest-500 mb-1">Priority</label>
+          <select className={selectCls} value={priority} onChange={e => setPriority(e.target.value)}>
+            <option value="">All priorities</option>
+            {PRIORITIES.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
+          </select>
         </div>
-      )}
+        <div>
+          <label className="block text-xs text-forest-500 mb-1">Status</label>
+          <select className={selectCls} value={status} onChange={e => setStatus(e.target.value)}>
+            <option value="">All statuses</option>
+            {STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs text-forest-500 mb-1">Sort</label>
+          <select className={selectCls} value={sortOrder} onChange={e => setSortOrder(e.target.value)}>
+            <option value="-1">Newest first</option>
+            <option value="1">Oldest first</option>
+          </select>
+        </div>
+        <div className="flex items-end">
+          <button
+            onClick={applyFilters}
+            disabled={loading}
+            className="bg-forest-600 hover:bg-forest-700 text-white text-sm px-4 py-2 rounded-lg font-medium disabled:opacity-50 transition-colors"
+          >
+            Apply
+          </button>
+        </div>
+      </div>
 
       {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl px-5 py-4 text-sm mb-4">{error}</div>}
 
-      {results && (
+      {loading && (
+        <div className="text-center py-12 text-forest-400 text-sm">Loading your applications…</div>
+      )}
+
+      {!loading && results && (
         <>
-          <p className="text-xs text-forest-400 mb-3">{results.total} application(s) found</p>
+          <p className="text-xs text-forest-400 mb-3">{results.total} application(s)</p>
 
           {results.data.length === 0 ? (
-            <div className="text-center py-12 text-forest-400 text-sm">No applications found for this ID.</div>
+            <div className="text-center py-12 text-forest-400 text-sm">
+              No applications found.{' '}
+              <Link href="/applicant/submit" className="text-forest-600 underline">Submit one now</Link>
+            </div>
           ) : (
             <div className="space-y-3">
               {results.data.map((app) => (
@@ -249,27 +226,46 @@ function MyApplications() {
   )
 }
 
+// ── Page ──────────────────────────────────────────────────────────────────────
+
 export default function TrackPage() {
-  const [tab, setTab] = useState('history')
+  const router = useRouter()
+  const [tab,  setTab]  = useState('mine')
+  const [user, setUser] = useState(null)
+
+  useEffect(() => {
+    if (!isLoggedIn()) {
+      router.replace('/applicant/login')
+      return
+    }
+    setUser(getUser())
+  }, [router])
+
+  if (!user) return (
+    <div className="flex items-center justify-center min-h-64 text-forest-400">Loading…</div>
+  )
 
   const tabCls = (t) =>
     `px-5 py-2.5 text-sm font-semibold rounded-lg transition-colors ${
-      tab === t
-        ? 'bg-forest-700 text-white'
-        : 'text-forest-600 hover:bg-forest-100'
+      tab === t ? 'bg-forest-700 text-white' : 'text-forest-600 hover:bg-forest-100'
     }`
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-10">
-      <h1 className="text-2xl font-bold text-forest-800 mb-1">Track Applications</h1>
-      <p className="text-forest-500 text-sm mb-6">View your application history or look up a specific application.</p>
+      <h1 className="text-2xl font-bold text-forest-800 mb-1">My Applications</h1>
+      <p className="text-forest-500 text-sm mb-6">
+        Signed in as <span className="font-medium text-forest-700">{user.full_name}</span>
+      </p>
 
       <div className="flex gap-2 mb-8 bg-forest-50 border border-forest-100 rounded-xl p-1 w-fit">
-        <button className={tabCls('history')} onClick={() => setTab('history')}>My Applications</button>
-        <button className={tabCls('single')}  onClick={() => setTab('single')}>Track by ID</button>
+        <button className={tabCls('mine')}   onClick={() => setTab('mine')}>My Applications</button>
+        <button className={tabCls('single')} onClick={() => setTab('single')}>Track by ID</button>
       </div>
 
-      {tab === 'history' ? <MyApplications /> : <TrackById />}
+      {tab === 'mine'
+        ? <MyApplications applicantId={user.applicant_id} />
+        : <TrackById />
+      }
     </div>
   )
 }
